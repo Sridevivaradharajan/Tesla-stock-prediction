@@ -45,7 +45,7 @@ streamlit run App.py
 ## 📁 Project Structure
 
 ```
-├── App.py                    # Streamlit web app
+├── App.py                   # Streamlit web app
 ├── Tesla.ipynb              # Full analysis notebook
 ├── requirements.txt         # Dependencies
 ├── Dataset/                 # TSLA historical data

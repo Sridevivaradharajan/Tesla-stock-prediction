@@ -4,11 +4,14 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import joblib
-from tensorflow.keras.models import load_model
-from tensorflow.keras.metrics import MeanSquaredError
 from datetime import datetime, timedelta
 import os
 import json
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.models import load_model, model_from_json
+from tensorflow.keras.metrics import MeanSquaredError
+import traceback
 
 # Page configuration
 st.set_page_config(
@@ -106,7 +109,7 @@ if 'uploaded_data' not in st.session_state:
 
 @st.cache_resource
 def load_model_artifacts():
-    """Load model and related artifacts with robust error handling"""
+    """Load model and related artifacts with enhanced compatibility"""
     try:
         deployment_dir = "deployment_artifacts"
         
@@ -115,15 +118,15 @@ def load_model_artifacts():
             return None, None, None, None
         
         files_in_dir = os.listdir(deployment_dir)
+        st.info(f"Files found: {files_in_dir}")
         
-        # Find .keras file (prioritize over .h5)
+        # Find model file
         model_file = None
         for file in files_in_dir:
             if file.endswith('.keras'):
                 model_file = file
                 break
         
-        # If no .keras file, try .h5
         if not model_file:
             for file in files_in_dir:
                 if file.endswith('.h5'):
@@ -135,27 +138,52 @@ def load_model_artifacts():
             return None, None, None, None
         
         model_path = os.path.join(deployment_dir, model_file)
+        st.info(f"Loading model from: {model_path}")
         
-        # Load model with custom objects for compatibility
+        # Try multiple loading strategies
+        model = None
+        loading_methods = [
+            ("Standard load_model", lambda: load_model(model_path, compile=False)),
+            ("Load with custom objects", lambda: load_model(
+                model_path,
+                custom_objects={'mse': MeanSquaredError(), 'MeanSquaredError': MeanSquaredError},
+                compile=False
+            )),
+            ("TF 2.x compatibility mode", lambda: tf.keras.models.load_model(model_path, compile=False)),
+        ]
+        
+        for method_name, load_func in loading_methods:
+            try:
+                st.info(f"Trying: {method_name}...")
+                model = load_func()
+                st.success(f"✓ Model loaded successfully using: {method_name}")
+                break
+            except Exception as e:
+                st.warning(f"✗ {method_name} failed: {str(e)[:100]}")
+                continue
+        
+        if model is None:
+            st.error("All loading methods failed!")
+            with st.expander("Show full error details"):
+                st.code(traceback.format_exc())
+            return None, None, None, None
+        
+        # Recompile model with simple configuration
         try:
-            custom_objects = {
-                'mse': MeanSquaredError(),
-                'MeanSquaredError': MeanSquaredError
-            }
-            model = load_model(model_path, custom_objects=custom_objects, compile=False)
-            
-            # Recompile with compatible metrics
             model.compile(
-                optimizer='adam',
+                optimizer=keras.optimizers.Adam(learning_rate=0.001),
                 loss='mse',
-                metrics=[MeanSquaredError(name='mse')]
+                metrics=['mae']
             )
+            st.success("Model recompiled successfully")
         except Exception as e:
-            st.error(f"Error loading model: {str(e)}")
-            st.info("Attempting alternative loading method...")
-            model = load_model(model_path, compile=False)
-            model.compile(optimizer='adam', loss='mse')
-            st.success("Model loaded with alternative method")
+            st.warning(f"Recompilation warning: {str(e)}")
+        
+        # Display model summary
+        with st.expander("View Model Architecture"):
+            model_summary = []
+            model.summary(print_fn=lambda x: model_summary.append(x))
+            st.code('\n'.join(model_summary))
         
         # Load Scalers
         scaler_X_path = os.path.join(deployment_dir, 'scaler_features.pkl')
@@ -167,6 +195,7 @@ def load_model_artifacts():
         
         scaler_X = joblib.load(scaler_X_path)
         scaler_y = joblib.load(scaler_y_path)
+        st.success("✓ Scalers loaded successfully")
         
         # Load Feature Columns
         feature_cols_path = os.path.join(deployment_dir, 'feature_columns.pkl')
@@ -215,12 +244,13 @@ def load_model_artifacts():
                 'batch_size': 32
             }
         
+        st.success("✓ All artifacts loaded successfully!")
+        
         return model, scaler_X, scaler_y, config
         
     except Exception as e:
-        st.error(f"Error loading artifacts: {str(e)}")
-        import traceback
-        with st.expander("View detailed error"):
+        st.error(f"Critical error loading artifacts: {str(e)}")
+        with st.expander("View detailed error traceback"):
             st.code(traceback.format_exc())
         return None, None, None, None
 

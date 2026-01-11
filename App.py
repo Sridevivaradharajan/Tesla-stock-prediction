@@ -232,7 +232,6 @@ def load_model_artifacts():
                 'batch_size': 32
             }
         
-        
         return model, scaler_X, scaler_y, config
         
     except Exception as e:
@@ -291,7 +290,6 @@ def make_prediction(data, model, scaler_X, scaler_y, config):
         
     except Exception as e:
         st.error(f"Prediction error: {str(e)}")
-        import traceback
         with st.expander("View detailed error"):
             st.code(traceback.format_exc())
         return None
@@ -581,6 +579,7 @@ def main():
                                 st.markdown("<br>", unsafe_allow_html=True)
                                 st.markdown("### Detailed Analysis")
                                 
+                                # Store raw numeric values, not formatted strings
                                 predictions_df = pd.DataFrame({
                                     'Horizon': ['1-Day Ahead', '5-Day Ahead', '10-Day Ahead'],
                                     'Target Date': [
@@ -589,19 +588,19 @@ def main():
                                         pred_date_10d.strftime('%Y-%m-%d')
                                     ],
                                     'Predicted Price': [
-                                        f'${predictions["1_day_ahead"]:.2f}',
-                                        f'${predictions["5_day_ahead"]:.2f}',
-                                        f'${predictions["10_day_ahead"]:.2f}'
+                                        predictions["1_day_ahead"],
+                                        predictions["5_day_ahead"],
+                                        predictions["10_day_ahead"]
                                     ],
                                     'Expected Change': [
-                                        f'${predictions["1_day_ahead"] - current_price:.2f}',
-                                        f'${predictions["5_day_ahead"] - current_price:.2f}',
-                                        f'${predictions["10_day_ahead"] - current_price:.2f}'
+                                        predictions["1_day_ahead"] - current_price,
+                                        predictions["5_day_ahead"] - current_price,
+                                        predictions["10_day_ahead"] - current_price
                                     ],
                                     'Change %': [
-                                        f'{change_1d:+.2f}%',
-                                        f'{change_5d:+.2f}%',
-                                        f'{change_10d:+.2f}%'
+                                        change_1d,
+                                        change_5d,
+                                        change_10d
                                     ],
                                     'Signal': [
                                         'BULLISH' if change_1d > 0 else 'BEARISH',
@@ -610,7 +609,14 @@ def main():
                                     ]
                                 })
                                 
-                                st.dataframe(predictions_df, use_container_width=True, hide_index=True)
+                                # Format display using Styler
+                                styled_df = predictions_df.style.format({
+                                    'Predicted Price': '${:.2f}',
+                                    'Expected Change': '${:+.2f}',
+                                    'Change %': '{:+.2f}%'
+                                })
+                                
+                                st.dataframe(styled_df, use_container_width=True, hide_index=True)
                                 
                                 st.markdown("---")
                                 st.markdown("### Price Prediction Visualization")
@@ -642,6 +648,8 @@ def main():
                     
             except Exception as e:
                 st.error(f"Error processing file: {str(e)}")
+                with st.expander("View detailed error"):
+                    st.code(traceback.format_exc())
         
         else:
             st.markdown("""
@@ -691,7 +699,7 @@ def main():
         
         st.markdown("---")
         
-        # Comparison data from your actual results
+        # Comparison data
         comparison_data = {
             'Model': ['SimpleRNN', 'SimpleRNN', 'SimpleRNN', 
                      'LSTM', 'LSTM', 'LSTM',
@@ -873,238 +881,6 @@ def main():
         
         <p><strong>Conclusion:</strong> Bidirectional LSTM achieves 98% improvement over SimpleRNN 
         and 93% improvement over standard LSTM for 1-day predictions, making it production-ready.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    elif page == "Methodology":
-        st.title("Project Methodology")
-        st.markdown("Comprehensive overview of the deep learning approach")
-        
-        st.subheader("1. Data Preprocessing & Quality")
-        st.markdown("""
-        <div class="info-box">
-        <h4>Dataset Characteristics</h4>
-        <ul>
-            <li><strong>Source:</strong> Tesla (TSLA) daily stock data</li>
-            <li><strong>Period:</strong> 2010-2020 (2,416 trading days)</li>
-            <li><strong>Quality:</strong> Zero missing values, zero duplicates</li>
-            <li><strong>Features:</strong> Open, High, Low, Close, Volume</li>
-            <li><strong>Target:</strong> Multi-horizon closing prices (1, 5, 10 days ahead)</li>
-        </ul>
-        
-        <h4>Missing Value Handling (Time-Series Specific)</h4>
-        <ul>
-            <li><strong>Analysis:</strong> No missing values detected in this dataset</li>
-            <li><strong>Strategy if present:</strong> Forward fill for prices (preserves last known value)</li>
-            <li><strong>Volume handling:</strong> Interpolation or median imputation</li>
-            <li><strong>Rationale:</strong> Time-series data requires temporal consistency - backward fill would introduce future information</li>
-            <li><strong>Critical:</strong> Never use future data to fill past values (data leakage prevention)</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.subheader("2. Feature Engineering")
-        st.markdown("""
-        <div class="metric-card">
-        <h4>Feature Selection</h4>
-        <p><strong>Core Features (OHLCV):</strong></p>
-        <ul>
-            <li><strong>Open:</strong> Opening price - market sentiment indicator</li>
-            <li><strong>High:</strong> Intraday peak - resistance levels</li>
-            <li><strong>Low:</strong> Intraday trough - support levels</li>
-            <li><strong>Close:</strong> Most important - daily trend indicator</li>
-            <li><strong>Volume:</strong> Trading volume - liquidity and conviction measure</li>
-        </ul>
-        
-        <p><strong>Sequence Creation (Lookback Window = 60 days):</strong></p>
-        <ul>
-            <li>Rolling window of 60 consecutive trading days</li>
-            <li>Captures ~3 months of market behavior</li>
-            <li>Input shape: (samples, 60, 5)</li>
-            <li>Enables model to learn temporal patterns</li>
-        </ul>
-        
-        <p><strong>Multi-Horizon Targets:</strong></p>
-        <ul>
-            <li>Target_1day: Close price 1 trading day ahead</li>
-            <li>Target_5day: Close price 5 trading days ahead</li>
-            <li>Target_10day: Close price 10 trading days ahead</li>
-            <li>Output shape: (samples, 3)</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.subheader("3. Train-Test Split & Data Leakage Prevention")
-        st.markdown("""
-        <div class="warning-box">
-        <h4>Critical: Temporal Split (No Random Shuffling)</h4>
-        <ul>
-            <li><strong>Training Set:</strong> First 80% (1,873 sequences) - 2010 to 2019</li>
-            <li><strong>Testing Set:</strong> Last 20% (423 sequences) - 2019 to 2020</li>
-            <li><strong>Rationale:</strong> Simulates real-world deployment - predicting truly unseen future</li>
-            <li><strong>No Data Leakage:</strong></li>
-            <ul>
-                <li>Scalers fit ONLY on training data</li>
-                <li>No test set information used during training</li>
-                <li>Sequential targets (shifted -1, -5, -10 days)</li>
-                <li>Validation split within training data only</li>
-            </ul>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.subheader("4. Feature Scaling")
-        st.markdown("""
-        <div class="info-box">
-        <h4>MinMaxScaler Normalization</h4>
-        <ul>
-            <li><strong>Range:</strong> [0, 1] for all features and targets</li>
-            <li><strong>Why MinMax:</strong> Preserves OHLC relationships, works well with LSTM</li>
-            <li><strong>Separate Scalers:</strong></li>
-            <ul>
-                <li>scaler_X for features (Open, High, Low, Close, Volume)</li>
-                <li>scaler_y for targets (3 horizon predictions)</li>
-            </ul>
-            <li><strong>Benefits:</strong></li>
-            <ul>
-                <li>Faster neural network convergence</li>
-                <li>Prevents features with large values from dominating</li>
-                <li>Avoids gradient explosion/vanishing</li>
-            </ul>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.subheader("5. Hyperparameter Optimization (Optuna)")
-        st.markdown("""
-        <div class="success-box">
-        <h4>Bayesian Optimization Process</h4>
-        <ul>
-            <li><strong>Method:</strong> Tree-structured Parzen Estimator (TPE)</li>
-            <li><strong>Search Space:</strong></li>
-            <ul>
-                <li>Units: [32, 64, 128]</li>
-                <li>Dropout: [0.1, 0.2, 0.3, 0.4]</li>
-                <li>Learning Rate: [0.0001, 0.01] (log scale)</li>
-                <li>Batch Size: [32, 64]</li>
-            </ul>
-            <li><strong>Validation Strategy:</strong> Time-Series Cross-Validation (2 splits)</li>
-            <li><strong>Pruning:</strong> Median pruner (stops unpromising trials early)</li>
-            <li><strong>Trials:</strong> 15 per model (60 total trials)</li>
-            <li><strong>Objective:</strong> Minimize validation MSE</li>
-        </ul>
-        
-        <h4>Best Hyperparameters Found:</h4>
-        <ul>
-            <li><strong>Units:</strong> 64 (optimal capacity without overfitting)</li>
-            <li><strong>Dropout:</strong> 0.2 (20% regularization)</li>
-            <li><strong>Learning Rate:</strong> 0.001 (stable convergence)</li>
-            <li><strong>Batch Size:</strong> 32 (good generalization)</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.subheader("6. Model Architecture: Bidirectional LSTM")
-        st.markdown("""
-        <div class="metric-card">
-        <h4>Layer-by-Layer Architecture</h4>
-        <pre style="background: #f5f5f5; padding: 15px; border-radius: 5px;">
-Input Layer: (60, 5)
-  ├─ 60 timesteps (days)
-  └─ 5 features (OHLCV)
-
-Bidirectional LSTM Layer 1: 128 total units
-  ├─ Forward LSTM: 64 units (day 1 → 60)
-  ├─ Backward LSTM: 64 units (day 60 → 1)
-  ├─ Concatenated: 128-dimensional representation
-  └─ return_sequences=True
-
-Dropout Layer 1: 20% dropout rate
-
-Bidirectional LSTM Layer 2: 64 total units
-  ├─ Forward LSTM: 32 units
-  ├─ Backward LSTM: 32 units
-  └─ return_sequences=False (final representation)
-
-Dropout Layer 2: 20% dropout rate
-
-Dense Layer: 32 units, ReLU activation
-  └─ Non-linear transformation
-
-Output Layer: 3 units (no activation)
-  └─ [1-day price, 5-day price, 10-day price]
-
-Optimizer: Adam (learning_rate=0.001)
-Loss Function: MSE (Mean Squared Error)
-        </pre>
-        
-        <h4>Why Bidirectional LSTM</h4>
-        <ul>
-            <li><strong>Forward Pass:</strong> Learns patterns from past to present</li>
-            <li><strong>Backward Pass:</strong> Understands context from present to past</li>
-            <li><strong>Combined:</strong> Rich representation capturing full temporal context</li>
-            <li><strong>Example:</strong> "Price rising + high volume in past + consolidating recently" → Strong uptrend prediction</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.subheader("7. Training Process")
-        st.markdown("""
-        <div class="info-box">
-        <h4>Training Configuration</h4>
-        <ul>
-            <li><strong>Epochs:</strong> 100 (with early stopping)</li>
-            <li><strong>Early Stopping:</strong> Patience=10, monitor='val_loss', restore_best_weights=True</li>
-            <li><strong>Learning Rate Reduction:</strong> ReduceLROnPlateau (factor=0.5, patience=5)</li>
-            <li><strong>Validation Split:</strong> 15% of training data</li>
-            <li><strong>Callbacks:</strong> Model checkpointing for best weights</li>
-        </ul>
-        
-        <h4>Training Time</h4>
-        <ul>
-            <li>Per model: ~15-20 minutes (with Optuna optimization)</li>
-            <li>Total for 4 models: ~1 hour</li>
-            <li>Hardware: CPU/GPU compatible</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.subheader("8. Evaluation Metrics")
-        st.markdown("""
-        <div class="metric-card">
-        <h4>Why These Metrics Matter</h4>
-        
-        <p><strong>1. R² Score (Coefficient of Determination)</strong></p>
-        <ul>
-            <li><strong>Range:</strong> -∞ to 1 (higher is better)</li>
-            <li><strong>Interpretation:</strong> % of variance explained by model</li>
-            <li><strong>Business Value:</strong> 0.85 = model explains 85% of price movements</li>
-            <li><strong>Use Case:</strong> Validates model reliability for trading</li>
-        </ul>
-        
-        <p><strong>2. RMSE (Root Mean Squared Error)</strong></p>
-        <ul>
-            <li><strong>Units:</strong> Dollars ($)</li>
-            <li><strong>Interpretation:</strong> Average prediction error magnitude</li>
-            <li><strong>Business Value:</strong> $23.72 RMSE = stop-loss should be ±$30</li>
-            <li><strong>Use Case:</strong> Risk management and position sizing</li>
-        </ul>
-        
-        <p><strong>3. MAE (Mean Absolute Error)</strong></p>
-        <ul>
-            <li><strong>Units:</strong> Dollars ($)</li>
-            <li><strong>Interpretation:</strong> Typical absolute error</li>
-            <li><strong>Business Value:</strong> $16.95 MAE = expect ±$17 deviation</li>
-            <li><strong>Use Case:</strong> Setting realistic profit targets</li>
-        </ul>
-        
-        <p><strong>4. MAPE (Mean Absolute Percentage Error)</strong></p>
-        <ul>
-            <li><strong>Units:</strong> Percentage (%)</li>
-            <li><strong>Interpretation:</strong> Scale-independent accuracy</li>
-            <li><strong>Business Value:</strong> 5.34% MAPE = excellent for volatile stocks</li>
-            <li><strong>Use Case:</strong> Comparing across different price levels</li>
-        </ul>
         </div>
         """, unsafe_allow_html=True)
 

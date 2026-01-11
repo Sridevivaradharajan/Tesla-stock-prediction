@@ -174,12 +174,6 @@ def load_model_artifacts():
         except Exception as e:
             st.warning(f"Recompilation warning: {str(e)}")
         
-        # Display model summary
-        with st.expander("View Model Architecture"):
-            model_summary = []
-            model.summary(print_fn=lambda x: model_summary.append(x))
-            st.code('\n'.join(model_summary))
-        
         # Load Scalers
         scaler_X_path = os.path.join(deployment_dir, 'scaler_features.pkl')
         scaler_y_path = os.path.join(deployment_dir, 'scaler_target.pkl')

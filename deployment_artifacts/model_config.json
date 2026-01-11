@@ -1,0 +1,71 @@
+{
+    "model_name": "Bidirectional LSTM",
+    "model_type": "Multi-Horizon Stock Price Predictor",
+    "framework": "TensorFlow/Keras",
+    "creation_date": "2026-01-10 14:34:04",
+    "best_hyperparameters": {
+        "units": 128,
+        "dropout": 0.2,
+        "learning_rate": 0.0037183641805732083,
+        "batch_size": 64
+    },
+    "lookback_window": 60,
+    "feature_columns": [
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Volume"
+    ],
+    "num_features": 5,
+    "target_variable": "Close",
+    "prediction_horizons": {
+        "1-day": "Next day closing price",
+        "5-day": "5 days ahead closing price",
+        "10-day": "10 days ahead closing price"
+    },
+    "performance_metrics": {
+        "1-day": {
+            "R2": 0.8522791417102953,
+            "RMSE": 23.72059409501912,
+            "MAE": 16.949551019528883,
+            "MAPE": 5.338107823786737
+        },
+        "5-day": {
+            "R2": 0.6825775123082019,
+            "RMSE": 37.812080127561956,
+            "MAE": 26.025596174935053,
+            "MAPE": 7.8902701508003315
+        },
+        "10-day": {
+            "R2": 0.4544002884835445,
+            "RMSE": 57.136028732348976,
+            "MAE": 36.42190846773315,
+            "MAPE": 10.449523343963984
+        }
+    },
+    "training_samples": 1825,
+    "testing_samples": 412,
+    "train_date_range": {
+        "start": "2010-09-08",
+        "end": "2018-03-05"
+    },
+    "test_date_range": {
+        "start": "2018-03-06",
+        "end": "2020-01-17"
+    },
+    "feature_scaler": {
+        "type": "MinMaxScaler",
+        "range": [
+            0,
+            1
+        ]
+    },
+    "target_scaler": {
+        "type": "MinMaxScaler",
+        "range": [
+            0,
+            1
+        ]
+    }
+}

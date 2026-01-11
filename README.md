@@ -116,16 +116,6 @@ Input: (60 timesteps, 5 features) → OHLCV data
 3. **Memory Efficiency**: LSTM cells solve vanishing gradient problem
 4. **Consistent Performance**: Best across ALL metrics and horizons
 
-## ⚠️ Disclaimer
-
-**Educational purposes only.** Not financial advice. Past performance doesn't guarantee future results. Always conduct thorough research before making investment decisions.
-
-## 📄 License
-
-MIT License
-
-## 👤 Author
-
 **Sridevi V**  
 📧 [GitHub](https://github.com/Sridevivaradharajan) | 💼 [LinkedIn](#)
 

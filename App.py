@@ -118,7 +118,6 @@ def load_model_artifacts():
             return None, None, None, None
         
         files_in_dir = os.listdir(deployment_dir)
-        st.info(f"Files found: {files_in_dir}")
         
         # Find model file
         model_file = None
@@ -138,7 +137,6 @@ def load_model_artifacts():
             return None, None, None, None
         
         model_path = os.path.join(deployment_dir, model_file)
-        st.info(f"Loading model from: {model_path}")
         
         # Try multiple loading strategies
         model = None
@@ -195,7 +193,6 @@ def load_model_artifacts():
         
         scaler_X = joblib.load(scaler_X_path)
         scaler_y = joblib.load(scaler_y_path)
-        st.success("✓ Scalers loaded successfully")
         
         # Load Feature Columns
         feature_cols_path = os.path.join(deployment_dir, 'feature_columns.pkl')
@@ -244,7 +241,6 @@ def load_model_artifacts():
                 'batch_size': 32
             }
         
-        st.success("✓ All artifacts loaded successfully!")
         
         return model, scaler_X, scaler_y, config
         

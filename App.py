@@ -115,7 +115,6 @@ def load_model_artifacts():
             return None, None, None, None
         
         files_in_dir = os.listdir(deployment_dir)
-        st.info(f"Files found: {', '.join(files_in_dir)}")
         
         # Find .keras file (prioritize over .h5)
         model_file = None
@@ -136,7 +135,6 @@ def load_model_artifacts():
             return None, None, None, None
         
         model_path = os.path.join(deployment_dir, model_file)
-        st.info(f"Loading model: {model_file}")
         
         # Load model with custom objects for compatibility
         try:
@@ -145,12 +143,13 @@ def load_model_artifacts():
                 'MeanSquaredError': MeanSquaredError
             }
             model = load_model(model_path, custom_objects=custom_objects, compile=False)
+            
+            # Recompile with compatible metrics
             model.compile(
                 optimizer='adam',
                 loss='mse',
                 metrics=[MeanSquaredError(name='mse')]
             )
-            st.success(f"Model loaded successfully: {model_file}")
         except Exception as e:
             st.error(f"Error loading model: {str(e)}")
             st.info("Attempting alternative loading method...")
@@ -168,7 +167,6 @@ def load_model_artifacts():
         
         scaler_X = joblib.load(scaler_X_path)
         scaler_y = joblib.load(scaler_y_path)
-        st.success("Scalers loaded successfully")
         
         # Load Feature Columns
         feature_cols_path = os.path.join(deployment_dir, 'feature_columns.pkl')
@@ -199,17 +197,24 @@ def load_model_artifacts():
         config.setdefault('model_name', 'Bidirectional LSTM')
         config.setdefault('framework', 'TensorFlow/Keras')
         config.setdefault('creation_date', '2026-01-10')
-        config.setdefault('training_samples', 1825)
-        config.setdefault('testing_samples', 412)
+        config.setdefault('training_samples', 1873)
+        config.setdefault('testing_samples', 423)
         
         if 'performance_metrics' not in config:
             config['performance_metrics'] = {
-                '1-day': {'R2': 0.8523, 'RMSE': 23.72, 'MAE': 16.95, 'MAPE': 5.34},
-                '5-day': {'R2': 0.6831, 'RMSE': 37.81, 'MAE': 26.03, 'MAPE': 7.89},
-                '10-day': {'R2': 0.4545, 'RMSE': 57.14, 'MAE': 36.42, 'MAPE': 10.45}
+                '1-day': {'R2': 0.852279, 'RMSE': 23.720594, 'MAE': 16.949551, 'MAPE': 5.338108},
+                '5-day': {'R2': 0.682578, 'RMSE': 37.812080, 'MAE': 26.025596, 'MAPE': 7.890270},
+                '10-day': {'R2': 0.454400, 'RMSE': 57.136029, 'MAE': 36.421908, 'MAPE': 10.449523}
             }
         
-        st.success("All artifacts loaded successfully!")
+        if 'best_hyperparameters' not in config:
+            config['best_hyperparameters'] = {
+                'units': 64,
+                'dropout': 0.2,
+                'learning_rate': 0.001,
+                'batch_size': 32
+            }
+        
         return model, scaler_X, scaler_y, config
         
     except Exception as e:
@@ -233,7 +238,7 @@ def validate_input_data(df):
         if df[col].isnull().any():
             return False, f"Column '{col}' has missing values"
     
-    return True, "Data validated successfully"
+    return True, "Data validation successful"
 
 def make_prediction(data, model, scaler_X, scaler_y, config):
     """Generate predictions using the trained model"""
@@ -241,16 +246,23 @@ def make_prediction(data, model, scaler_X, scaler_y, config):
         lookback = config.get('lookback_window', 60)
         feature_columns = config.get('feature_columns', ['Open', 'High', 'Low', 'Close', 'Volume'])
         
+        # Extract required features
         X = data[feature_columns].values
         
         if len(X) < lookback:
             st.error(f"Need at least {lookback} rows, got {len(X)}")
             return None
         
+        # Take last lookback sequence
         input_data = X[-lookback:]
+        
+        # Scale
         input_scaled = scaler_X.transform(input_data)
+        
+        # Reshape for LSTM
         input_reshaped = input_scaled.reshape(1, lookback, len(feature_columns))
         
+        # Predict
         prediction_scaled = model.predict(input_reshaped, verbose=0)
         prediction = scaler_y.inverse_transform(prediction_scaled)
         
@@ -319,6 +331,7 @@ def create_prediction_chart(historical_data, predictions, current_price):
         x=future_dates,
         y=upper_bound,
         mode='lines',
+        name='Upper Bound (95%)',
         line=dict(width=0),
         showlegend=False,
         hoverinfo='skip'
@@ -328,10 +341,11 @@ def create_prediction_chart(historical_data, predictions, current_price):
         x=future_dates,
         y=lower_bound,
         mode='lines',
+        name='Confidence Interval',
         fill='tonexty',
         fillcolor='rgba(231, 76, 60, 0.15)',
         line=dict(width=0),
-        name='95% Confidence Interval',
+        showlegend=True,
         hoverinfo='skip'
     ))
     
@@ -348,7 +362,8 @@ def create_prediction_chart(historical_data, predictions, current_price):
         height=550,
         hovermode='x unified',
         showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor='#fafafa'
     )
     
     return fig
@@ -365,14 +380,15 @@ Model: {config['model_name']}
 Framework: {config['framework']}
 Training Date: {config['creation_date']}
 Lookback Window: {config['lookback_window']} days
-Features: {', '.join(config['feature_columns'])}
+Features Used: {', '.join(config['feature_columns'])}
 
 CURRENT MARKET DATA
 Current Price: ${current_price:.2f}
+Data Source: User Uploaded CSV
 
 PREDICTIONS
 {'=' * 70}
-Horizon     Predicted Price    Change ($)    Change (%)    Signal
+Horizon     Predicted Price    Change ($)    Change (%)    Direction
 {'=' * 70}
 1-Day       ${predictions['1_day_ahead']:8.2f}      ${predictions['1_day_ahead'] - current_price:+8.2f}      {((predictions['1_day_ahead'] - current_price) / current_price * 100):+6.2f}%      {'BULLISH' if predictions['1_day_ahead'] > current_price else 'BEARISH'}
 5-Day       ${predictions['5_day_ahead']:8.2f}      ${predictions['5_day_ahead'] - current_price:+8.2f}      {((predictions['5_day_ahead'] - current_price) / current_price * 100):+6.2f}%      {'BULLISH' if predictions['5_day_ahead'] > current_price else 'BEARISH'}
@@ -390,12 +406,12 @@ MAPE            {config['performance_metrics']['1-day']['MAPE']:5.2f}%      {con
 {'=' * 70}
 
 DISCLAIMER
-This prediction is for educational purposes only and should NOT be 
-considered as financial advice. Always consult with qualified financial 
-advisors before making investment decisions.
+This prediction is generated by a machine learning model for educational
+and research purposes only. It should NOT be considered as financial advice.
 
 Report Generated By: Tesla Stock Price Prediction System
 Developer: Sridevi V
+Project: Deep Learning for Financial Time Series Forecasting
 """
     return report
 
@@ -414,30 +430,9 @@ def main():
         
         page = st.radio(
             "Navigation",
-            ["Prediction", "Model Comparison", "About"],
+            ["Prediction", "Model Comparison"],
             label_visibility="collapsed"
         )
-        
-        st.markdown("---")
-        
-        st.markdown("""
-        <div class="info-box">
-        <h4>Requirements</h4>
-        <ul style="margin: 0; padding-left: 20px;">
-        <li>CSV file with stock data</li>
-        <li>Minimum 60 days of history</li>
-        <li>Columns: Open, High, Low, Close, Volume</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        st.markdown("""
-        <div style="text-align: center; font-size: 12px; color: #666;">
-        <p>Developed by<br><b>Sridevi V</b></p>
-        <p style="margin-top: 10px;">Deep Learning Capstone Project</p>
-        </div>
-        """, unsafe_allow_html=True)
     
     # Load model artifacts
     model, scaler_X, scaler_y, config = load_model_artifacts()
@@ -446,27 +441,27 @@ def main():
         st.markdown("""
         <div class="error-box">
         <h3>Model Loading Failed</h3>
-        <p>Ensure the <code>deployment_artifacts/</code> folder contains:</p>
+        <p>Please ensure the following files exist in the <code>deployment_artifacts/</code> folder:</p>
         <ul>
             <li>Model file (.keras or .h5)</li>
             <li>scaler_features.pkl</li>
             <li>scaler_target.pkl</li>
             <li>feature_columns.pkl (optional)</li>
-            <li>model_config.json (optional)</li>
+            <li>model_config.json or model_config.pkl (optional)</li>
         </ul>
         </div>
         """, unsafe_allow_html=True)
         return
     
-    # Main content
+    # Main content based on page selection
     if page == "Prediction":
         st.title("Tesla Stock Price Prediction")
-        st.markdown("Upload historical stock data to generate multi-horizon price forecasts")
+        st.markdown("Upload historical stock data to generate multi-horizon price predictions")
         
         uploaded_file = st.file_uploader(
             "Upload Stock Data (CSV)",
             type=['csv'],
-            help="CSV with at least 60 days of OHLCV data"
+            help="Upload CSV with at least 60 days of OHLCV data"
         )
         
         if uploaded_file is not None:
@@ -478,6 +473,7 @@ def main():
                     df = df.sort_values('Date').reset_index(drop=True)
                 
                 st.session_state.uploaded_data = df
+                
                 is_valid, message = validate_input_data(df)
                 
                 if is_valid:
@@ -485,294 +481,6 @@ def main():
                     
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h4>Architecture</h4>
-                <p><strong>Model:</strong> {config['model_name']}</p>
-                <p><strong>Framework:</strong> {config['framework']}</p>
-                <p><strong>Lookback:</strong> {config['lookback_window']} days</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h4>Dataset</h4>
-                <p><strong>Training:</strong> {config['training_samples']:,} samples</p>
-                <p><strong>Testing:</strong> {config['testing_samples']:,} samples</p>
-                <p><strong>Features:</strong> {len(config['feature_columns'])}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h4>Performance</h4>
-                <p><strong>R² (1-day):</strong> {config['performance_metrics']['1-day']['R2']:.4f}</p>
-                <p><strong>MAPE (1-day):</strong> {config['performance_metrics']['1-day']['MAPE']:.2f}%</p>
-                <p><strong>MAE (1-day):</strong> ${config['performance_metrics']['1-day']['MAE']:.2f}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # Comparison data
-        comparison_data = {
-            'Model': ['SimpleRNN', 'SimpleRNN', 'SimpleRNN', 
-                     'LSTM', 'LSTM', 'LSTM',
-                     'Bidirectional LSTM', 'Bidirectional LSTM', 'Bidirectional LSTM',
-                     'Stacked LSTM', 'Stacked LSTM', 'Stacked LSTM'],
-            'Horizon': ['1-day', '5-day', '10-day'] * 4,
-            'MAE': [34.88, 37.69, 47.19, 32.32, 43.50, 43.39, 16.95, 26.03, 36.42, 33.11, 40.99, 46.33],
-            'RMSE': [46.57, 53.26, 69.80, 46.09, 61.00, 68.41, 23.72, 37.81, 57.14, 46.48, 58.64, 71.14],
-            'R²': [0.431, 0.370, 0.186, 0.442, 0.174, 0.218, 0.852, 0.683, 0.454, 0.433, 0.236, 0.154],
-            'MAPE': [10.47, 11.10, 13.51, 9.67, 12.85, 12.31, 5.34, 7.89, 10.45, 9.95, 12.06, 13.15]
-        }
-        
-        comp_df = pd.DataFrame(comparison_data)
-        
-        st.subheader("Performance Comparison")
-        
-        tab1, tab2, tab3 = st.tabs(["By Horizon", "By Model", "Full Data"])
-        
-        with tab1:
-            horizon_select = st.selectbox("Select Prediction Horizon", ['1-day', '5-day', '10-day'])
-            horizon_data = comp_df[comp_df['Horizon'] == horizon_select].copy()
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig_r2 = go.Figure(data=[
-                    go.Bar(x=horizon_data['Model'], y=horizon_data['R²'], 
-                          marker_color=['#e74c3c', '#f39c12', '#27ae60', '#3498db'],
-                          text=horizon_data['R²'].round(3), textposition='auto')
-                ])
-                fig_r2.update_layout(title=f'R² Score ({horizon_select})',
-                                    yaxis_title='R² Score', height=400, template='plotly_white')
-                st.plotly_chart(fig_r2, use_container_width=True)
-                
-                fig_mae = go.Figure(data=[
-                    go.Bar(x=horizon_data['Model'], y=horizon_data['MAE'],
-                          marker_color=['#e74c3c', '#f39c12', '#27ae60', '#3498db'],
-                          text=horizon_data['MAE'].round(2), textposition='auto')
-                ])
-                fig_mae.update_layout(title=f'MAE ({horizon_select})',
-                                     yaxis_title='MAE ($)', height=400, template='plotly_white')
-                st.plotly_chart(fig_mae, use_container_width=True)
-            
-            with col2:
-                fig_rmse = go.Figure(data=[
-                    go.Bar(x=horizon_data['Model'], y=horizon_data['RMSE'],
-                          marker_color=['#e74c3c', '#f39c12', '#27ae60', '#3498db'],
-                          text=horizon_data['RMSE'].round(2), textposition='auto')
-                ])
-                fig_rmse.update_layout(title=f'RMSE ({horizon_select})',
-                                      yaxis_title='RMSE ($)', height=400, template='plotly_white')
-                st.plotly_chart(fig_rmse, use_container_width=True)
-                
-                fig_mape = go.Figure(data=[
-                    go.Bar(x=horizon_data['Model'], y=horizon_data['MAPE'],
-                          marker_color=['#e74c3c', '#f39c12', '#27ae60', '#3498db'],
-                          text=horizon_data['MAPE'].round(2), textposition='auto')
-                ])
-                fig_mape.update_layout(title=f'MAPE ({horizon_select})',
-                                      yaxis_title='MAPE (%)', height=400, template='plotly_white')
-                st.plotly_chart(fig_mape, use_container_width=True)
-        
-        with tab2:
-            model_select = st.selectbox("Select Model", ['SimpleRNN', 'LSTM', 'Bidirectional LSTM', 'Stacked LSTM'])
-            model_data = comp_df[comp_df['Model'] == model_select].copy()
-            
-            fig_multi = make_subplots(
-                rows=2, cols=2,
-                subplot_titles=('R² Score', 'RMSE ($)', 'MAE ($)', 'MAPE (%)'),
-                specs=[[{'type': 'bar'}, {'type': 'bar'}],
-                       [{'type': 'bar'}, {'type': 'bar'}]]
-            )
-            
-            colors_horizon = ['#2c3e50', '#3498db', '#2980b9']
-            
-            fig_multi.add_trace(go.Bar(x=model_data['Horizon'], y=model_data['R²'], 
-                                       marker_color=colors_horizon, showlegend=False), row=1, col=1)
-            fig_multi.add_trace(go.Bar(x=model_data['Horizon'], y=model_data['RMSE'],
-                                       marker_color=colors_horizon, showlegend=False), row=1, col=2)
-            fig_multi.add_trace(go.Bar(x=model_data['Horizon'], y=model_data['MAE'],
-                                       marker_color=colors_horizon, showlegend=False), row=2, col=1)
-            fig_multi.add_trace(go.Bar(x=model_data['Horizon'], y=model_data['MAPE'],
-                                       marker_color=colors_horizon, showlegend=False), row=2, col=2)
-            
-            fig_multi.update_layout(height=600, title_text=f"{model_select} Performance Across Horizons",
-                                   template='plotly_white')
-            st.plotly_chart(fig_multi, use_container_width=True)
-        
-        with tab3:
-            st.dataframe(comp_df.style.format({
-                'MAE': '{:.2f}',
-                'RMSE': '{:.2f}',
-                'R²': '{:.4f}',
-                'MAPE': '{:.2f}'
-            }), use_container_width=True, hide_index=True)
-        
-        st.markdown("---")
-        st.subheader("Analysis Summary")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("""
-            <div class="info-box">
-            <h4>Why Bidirectional LSTM Wins</h4>
-            <ul>
-                <li><strong>Bidirectional Processing:</strong> Analyzes data in both forward and backward directions, capturing comprehensive temporal patterns</li>
-                <li><strong>Superior Accuracy:</strong> 2-3x better performance than SimpleRNN across all metrics</li>
-                <li><strong>Robust Performance:</strong> Maintains high accuracy (R² = 0.85) for short-term predictions</li>
-                <li><strong>Long-term Dependencies:</strong> Effectively captures complex market patterns over 60-day window</li>
-                <li><strong>Gradient Stability:</strong> LSTM architecture prevents vanishing gradient problem</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown("""
-            <div class="warning-box">
-            <h4>Model Limitations</h4>
-            <ul>
-                <li><strong>Horizon Decay:</strong> Accuracy decreases significantly for longer forecasts (10-day R² = 0.45)</li>
-                <li><strong>External Events:</strong> Cannot predict impact of news, policy changes, or market shocks</li>
-                <li><strong>Data Requirements:</strong> Requires minimum 60 days of clean historical data</li>
-                <li><strong>Market Volatility:</strong> Performance varies during high volatility periods</li>
-                <li><strong>Black Swan Events:</strong> Unpredictable extreme events cannot be forecasted</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        st.markdown("""
-        <div class="metric-card">
-        <h4>Comparative Model Analysis</h4>
-        
-        <p><strong>Bidirectional LSTM (Deployed):</strong> Best overall performance with R² of 0.852 for 1-day predictions. 
-        The bidirectional architecture allows the model to learn from both past and future contexts within the lookback window, 
-        significantly improving pattern recognition.</p>
-        
-        <p><strong>Standard LSTM:</strong> Moderate performance with R² ranging from 0.17 to 0.44. While better than SimpleRNN, 
-        it lacks the bidirectional advantage, limiting its ability to capture comprehensive temporal patterns.</p>
-        
-        <p><strong>Stacked LSTM:</strong> Similar performance to standard LSTM despite deeper architecture. The additional layers 
-        may lead to overfitting without sufficient data, demonstrating that depth alone doesn't guarantee better results.</p>
-        
-        <p><strong>SimpleRNN:</strong> Weakest performer with R² of 0.19-0.43. Suffers from vanishing gradient problem and 
-        cannot effectively capture long-term dependencies critical for accurate stock price prediction.</p>
-        
-        <p><strong>Conclusion:</strong> Bidirectional LSTM represents the optimal balance between model complexity and 
-        predictive performance, making it the clear choice for multi-horizon stock forecasting applications.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    else:  # About page
-        st.title("About This Project")
-        
-        st.markdown("""
-        <div class="metric-card">
-        <h2>Tesla Stock Price Prediction</h2>
-        <p>Advanced deep learning application using Bidirectional LSTM neural networks for multi-horizon 
-        stock price forecasting (1-day, 5-day, and 10-day predictions).</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("""
-            <div class="metric-card">
-            <h3>Project Details</h3>
-            <p><strong>Type:</strong> Deep Learning Capstone</p>
-            <p><strong>Domain:</strong> Financial Forecasting</p>
-            <p><strong>Developer:</strong> Sridevi V</p>
-            <p><strong>Date:</strong> January 2026</p>
-            <p><strong>Institution:</strong> Labmentix Internship</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown("""
-            <div class="metric-card">
-            <h3>Technology Stack</h3>
-            <ul>
-                <li>Python 3.x</li>
-                <li>TensorFlow/Keras</li>
-                <li>Bidirectional LSTM</li>
-                <li>Streamlit</li>
-                <li>Plotly</li>
-                <li>Scikit-learn</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        st.markdown("""
-        <div class="metric-card">
-        <h3>Model Architecture</h3>
-        
-        <h4>Key Specifications:</h4>
-        <ul>
-            <li><strong>Architecture:</strong> Bidirectional LSTM with 60-day lookback window</li>
-            <li><strong>Input Features:</strong> Open, High, Low, Close, Volume (OHLCV)</li>
-            <li><strong>Training Data:</strong> 7+ years of historical data (2010-2018)</li>
-            <li><strong>Optimization:</strong> GridSearchCV hyperparameter tuning</li>
-            <li><strong>Normalization:</strong> MinMaxScaler for stable training</li>
-            <li><strong>Output:</strong> Multi-horizon predictions (1, 5, 10 days)</li>
-        </ul>
-        
-        <h4>Performance Metrics:</h4>
-        <ul>
-            <li>1-day: R² = 0.85, MAPE = 5.34%</li>
-            <li>5-day: R² = 0.68, MAPE = 7.89%</li>
-            <li>10-day: R² = 0.45, MAPE = 10.45%</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        st.markdown("""
-        <div class="metric-card">
-        <h3>Applications</h3>
-        <ul>
-            <li><strong>Algorithmic Trading:</strong> Generate data-driven trading signals</li>
-            <li><strong>Risk Management:</strong> Portfolio risk assessment and stop-loss optimization</li>
-            <li><strong>Investment Strategy:</strong> Support informed decision-making</li>
-            <li><strong>Market Analysis:</strong> Understand price dynamics and trends</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        st.markdown("""
-        <div class="warning-box">
-        <h3>Important Disclaimer</h3>
-        <p>This application is developed for <strong>educational and research purposes only</strong>. 
-        Predictions should <strong>NOT</strong> be considered as financial advice.</p>
-        
-        <p><strong>Users must:</strong></p>
-        <ul>
-            <li>Conduct independent research</li>
-            <li>Consult qualified financial advisors</li>
-            <li>Consider risk tolerance and investment goals</li>
-            <li>Never invest more than they can afford to lose</li>
-        </ul>
-        
-        <p><strong>Risk Warning:</strong> Stock investments carry inherent risks. Past performance 
-        does not guarantee future results. Model accuracy varies with market conditions.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-if __name__ == "__main__":
-    main()
                         st.metric("Total Records", f"{len(df):,}")
                     with col2:
                         st.metric("Current Price", f"${df['Close'].iloc[-1]:.2f}")
@@ -800,7 +508,7 @@ if __name__ == "__main__":
                                 current_price = df['Close'].iloc[-1]
                                 
                                 st.markdown("---")
-                                st.subheader("Multi-Horizon Forecasts")
+                                st.subheader("Multi-Horizon Predictions")
                                 
                                 change_1d = ((predictions['1_day_ahead'] - current_price) / current_price * 100)
                                 change_5d = ((predictions['5_day_ahead'] - current_price) / current_price * 100)
@@ -857,7 +565,7 @@ if __name__ == "__main__":
                                 st.markdown("### Detailed Analysis")
                                 
                                 predictions_df = pd.DataFrame({
-                                    'Horizon': ['1-Day', '5-Day', '10-Day'],
+                                    'Horizon': ['1-Day Ahead', '5-Day Ahead', '10-Day Ahead'],
                                     'Target Date': [
                                         pred_date_1d.strftime('%Y-%m-%d'),
                                         pred_date_5d.strftime('%Y-%m-%d'),
@@ -898,7 +606,8 @@ if __name__ == "__main__":
                                     st.markdown("""
                                     <div class="warning-box">
                                     <strong>Disclaimer:</strong> These predictions are generated by a machine learning model 
-                                    for educational purposes only. Not financial advice. Consult qualified advisors before making investment decisions.
+                                    and should not be considered as financial advice. Always conduct thorough research 
+                                    before making investment decisions.
                                     </div>
                                     """, unsafe_allow_html=True)
                                 with col2:
@@ -921,20 +630,466 @@ if __name__ == "__main__":
             st.markdown("""
             <div class="info-box">
             <strong>Getting Started:</strong><br>
-            Upload a CSV file with Tesla stock data containing:
+            Upload a CSV file containing Tesla stock data with:
             <ul>
                 <li>At least 60 days of historical data</li>
                 <li>Required columns: Open, High, Low, Close, Volume</li>
-                <li>Optional: Date column for visualization</li>
+                <li>Optional: Date column for better visualization</li>
             </ul>
             </div>
             """, unsafe_allow_html=True)
     
     elif page == "Model Comparison":
-        st.title("Model Architecture Comparison")
-        st.markdown("Comprehensive analysis of RNN architectures for stock price forecasting")
+        st.title("Model Comparison: RNN Architectures")
+        st.markdown("Comprehensive comparison of different RNN architectures for stock prediction")
         
-        # Model specifications
+        # Deployed Model Details
         st.subheader("Deployed Model Specifications")
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h4>Architecture Details</h4>
+                <p><strong>Model:</strong> {config['model_name']}</p>
+                <p><strong>Framework:</strong> {config['framework']}</p>
+                <p><strong>Lookback Window:</strong> {config['lookback_window']} days</p>
+                <p><strong>Features:</strong> {', '.join(config['feature_columns'])}</p>
+                <p><strong>Training Samples:</strong> {config['training_samples']:,}</p>
+                <p><strong>Testing Samples:</strong> {config['testing_samples']:,}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h4>Best Hyperparameters (Optuna)</h4>
+                <p><strong>Units:</strong> {config['best_hyperparameters']['units']}</p>
+                <p><strong>Dropout:</strong> {config['best_hyperparameters']['dropout']}</p>
+                <p><strong>Learning Rate:</strong> {config['best_hyperparameters']['learning_rate']}</p>
+                <p><strong>Batch Size:</strong> {config['best_hyperparameters']['batch_size']}</p>
+                <p><strong>Optimization:</strong> Bayesian (TPE Sampler)</p>
+                <p><strong>Creation Date:</strong> {config['creation_date']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Comparison data from your actual results
+        comparison_data = {
+            'Model': ['SimpleRNN', 'SimpleRNN', 'SimpleRNN', 
+                     'LSTM', 'LSTM', 'LSTM',
+                     'Bidirectional LSTM', 'Bidirectional LSTM', 'Bidirectional LSTM',
+                     'Stacked LSTM', 'Stacked LSTM', 'Stacked LSTM'],
+            'Horizon': ['1-day', '5-day', '10-day'] * 4,
+            'MAE': [34.88, 37.69, 47.19, 32.32, 43.50, 43.39, 16.95, 26.03, 36.42, 33.11, 40.99, 46.33],
+            'RMSE': [46.57, 53.26, 69.80, 46.09, 61.00, 68.41, 23.72, 37.81, 57.14, 46.48, 58.64, 71.14],
+            'R²': [0.431, 0.370, 0.186, 0.442, 0.174, 0.218, 0.852, 0.683, 0.454, 0.433, 0.236, 0.154],
+            'MAPE': [10.47, 11.10, 13.51, 9.67, 12.85, 12.31, 5.34, 7.89, 10.45, 9.95, 12.06, 13.15]
+        }
+        
+        comp_df = pd.DataFrame(comparison_data)
+        
+        st.subheader("Performance Comparison")
+        
+        tab1, tab2, tab3 = st.tabs(["By Horizon", "By Model", "Full Table"])
+        
+        with tab1:
+            horizon_select = st.selectbox("Select Prediction Horizon", ['1-day', '5-day', '10-day'])
+            horizon_data = comp_df[comp_df['Horizon'] == horizon_select].copy()
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                fig_r2 = go.Figure(data=[
+                    go.Bar(x=horizon_data['Model'], y=horizon_data['R²'], 
+                          marker_color=['#e74c3c', '#f39c12', '#27ae60', '#3498db'],
+                          text=horizon_data['R²'].round(3), textposition='auto')
+                ])
+                fig_r2.update_layout(title=f'R² Score Comparison ({horizon_select})',
+                                    yaxis_title='R² Score', height=400, template='plotly_white')
+                st.plotly_chart(fig_r2, use_container_width=True)
+                
+                fig_mae = go.Figure(data=[
+                    go.Bar(x=horizon_data['Model'], y=horizon_data['MAE'],
+                          marker_color=['#e74c3c', '#f39c12', '#27ae60', '#3498db'],
+                          text=horizon_data['MAE'].round(2), textposition='auto')
+                ])
+                fig_mae.update_layout(title=f'MAE Comparison ({horizon_select})',
+                                     yaxis_title='MAE ($)', height=400, template='plotly_white')
+                st.plotly_chart(fig_mae, use_container_width=True)
+            
+            with col2:
+                fig_rmse = go.Figure(data=[
+                    go.Bar(x=horizon_data['Model'], y=horizon_data['RMSE'],
+                          marker_color=['#e74c3c', '#f39c12', '#27ae60', '#3498db'],
+                          text=horizon_data['RMSE'].round(2), textposition='auto')
+                ])
+                fig_rmse.update_layout(title=f'RMSE Comparison ({horizon_select})',
+                                      yaxis_title='RMSE ($)', height=400, template='plotly_white')
+                st.plotly_chart(fig_rmse, use_container_width=True)
+                
+                fig_mape = go.Figure(data=[
+                    go.Bar(x=horizon_data['Model'], y=horizon_data['MAPE'],
+                          marker_color=['#e74c3c', '#f39c12', '#27ae60', '#3498db'],
+                          text=horizon_data['MAPE'].round(2), textposition='auto')
+                ])
+                fig_mape.update_layout(title=f'MAPE Comparison ({horizon_select})',
+                                      yaxis_title='MAPE (%)', height=400, template='plotly_white')
+                st.plotly_chart(fig_mape, use_container_width=True)
+        
+        with tab2:
+            model_select = st.selectbox("Select Model", ['SimpleRNN', 'LSTM', 'Bidirectional LSTM', 'Stacked LSTM'])
+            model_data = comp_df[comp_df['Model'] == model_select].copy()
+            
+            fig_multi = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=('R² Score', 'RMSE ($)', 'MAE ($)', 'MAPE (%)'),
+                specs=[[{'type': 'bar'}, {'type': 'bar'}],
+                       [{'type': 'bar'}, {'type': 'bar'}]]
+            )
+            
+            colors_horizon = ['#2c3e50', '#3498db', '#2980b9']
+            
+            fig_multi.add_trace(go.Bar(x=model_data['Horizon'], y=model_data['R²'], 
+                                       marker_color=colors_horizon, showlegend=False), row=1, col=1)
+            fig_multi.add_trace(go.Bar(x=model_data['Horizon'], y=model_data['RMSE'],
+                                       marker_color=colors_horizon, showlegend=False), row=1, col=2)
+            fig_multi.add_trace(go.Bar(x=model_data['Horizon'], y=model_data['MAE'],
+                                       marker_color=colors_horizon, showlegend=False), row=2, col=1)
+            fig_multi.add_trace(go.Bar(x=model_data['Horizon'], y=model_data['MAPE'],
+                                       marker_color=colors_horizon, showlegend=False), row=2, col=2)
+            
+            fig_multi.update_layout(height=600, title_text=f"{model_select} Performance Across Horizons",
+                                   template='plotly_white')
+            st.plotly_chart(fig_multi, use_container_width=True)
+        
+        with tab3:
+            st.dataframe(comp_df.style.format({
+                'MAE': '{:.2f}',
+                'RMSE': '{:.2f}',
+                'R²': '{:.4f}',
+                'MAPE': '{:.2f}'
+            }), use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        st.subheader("Model Analysis")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+            <div class="info-box">
+            <h4>Strengths of Bidirectional LSTM</h4>
+            <ul>
+                <li>High R² score (0.85) for 1-day predictions</li>
+                <li>Low MAPE (5.34%) indicating precise forecasts</li>
+                <li>Bidirectional processing captures temporal patterns</li>
+                <li>60-day lookback provides rich context</li>
+                <li>Trained on 1,873 samples (2010-2019 data)</li>
+                <li>2-3x more accurate than SimpleRNN</li>
+                <li>Optimized using Optuna (15 trials, Bayesian search)</li>
+            </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("""
+            <div class="warning-box">
+            <h4>Limitations & Considerations</h4>
+            <ul>
+                <li>Performance decreases for longer horizons</li>
+                <li>Does not account for external events</li>
+                <li>Requires minimum 60 days of data</li>
+                <li>Market volatility affects accuracy</li>
+                <li>Not suitable for extreme market conditions</li>
+                <li>Black swan events cannot be predicted</li>
+                <li>R² declines: 0.85 (1d) → 0.68 (5d) → 0.45 (10d)</li>
+            </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        st.subheader("Why Bidirectional LSTM Won")
+        
+        st.markdown("""
+        <div class="success-box">
+        <h4>Comparative Analysis</h4>
+        
+        <p><strong>1. Bidirectional LSTM (Selected Model) - Best Overall</strong></p>
+        <ul>
+            <li>Highest R² (0.852 for 1-day) - explains 85% of variance</li>
+            <li>Lowest MAE ($16.95 for 1-day) - most accurate predictions</li>
+            <li>Lowest RMSE ($23.72 for 1-day) - smallest prediction errors</li>
+            <li>Lowest MAPE (5.34% for 1-day) - best percentage accuracy</li>
+            <li><strong>Key Advantage:</strong> Processes sequences bidirectionally (forward + backward)</li>
+            <li><strong>Hyperparameters:</strong> 64 units, 0.2 dropout, 0.001 learning rate</li>
+        </ul>
+        
+        <p><strong>2. LSTM - Moderate Performance</strong></p>
+        <ul>
+            <li>R² ranges from 0.17 to 0.44 across horizons</li>
+            <li>Better than SimpleRNN but lacks bidirectional context</li>
+            <li>Unidirectional processing limits pattern recognition</li>
+        </ul>
+        
+        <p><strong>3. Stacked LSTM - Inconsistent</strong></p>
+        <ul>
+            <li>Similar to LSTM performance (R² 0.15-0.43)</li>
+            <li>Deeper architecture doesn't improve results</li>
+            <li>May suffer from overfitting or gradient issues</li>
+        </ul>
+        
+        <p><strong>4. SimpleRNN - Weakest Performance</strong></p>
+        <ul>
+            <li>Lowest R² scores (0.19 to 0.43)</li>
+            <li>Highest errors: MAPE up to 13.51%</li>
+            <li><strong>Why it fails:</strong> Cannot capture long-term dependencies</li>
+            <li>Suffers from vanishing gradient problem</li>
+        </ul>
+        
+        <p><strong>Optimization Process (Optuna):</strong></p>
+        <ul>
+            <li>Bayesian hyperparameter search (TPE Sampler)</li>
+            <li>15 trials per model with early pruning</li>
+            <li>Time-series cross-validation (2 splits)</li>
+            <li>Median pruner for computational efficiency</li>
+        </ul>
+        
+        <p><strong>Conclusion:</strong> Bidirectional LSTM achieves 98% improvement over SimpleRNN 
+        and 93% improvement over standard LSTM for 1-day predictions, making it production-ready.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    elif page == "Methodology":
+        st.title("Project Methodology")
+        st.markdown("Comprehensive overview of the deep learning approach")
+        
+        st.subheader("1. Data Preprocessing & Quality")
+        st.markdown("""
+        <div class="info-box">
+        <h4>Dataset Characteristics</h4>
+        <ul>
+            <li><strong>Source:</strong> Tesla (TSLA) daily stock data</li>
+            <li><strong>Period:</strong> 2010-2020 (2,416 trading days)</li>
+            <li><strong>Quality:</strong> Zero missing values, zero duplicates</li>
+            <li><strong>Features:</strong> Open, High, Low, Close, Volume</li>
+            <li><strong>Target:</strong> Multi-horizon closing prices (1, 5, 10 days ahead)</li>
+        </ul>
+        
+        <h4>Missing Value Handling (Time-Series Specific)</h4>
+        <ul>
+            <li><strong>Analysis:</strong> No missing values detected in this dataset</li>
+            <li><strong>Strategy if present:</strong> Forward fill for prices (preserves last known value)</li>
+            <li><strong>Volume handling:</strong> Interpolation or median imputation</li>
+            <li><strong>Rationale:</strong> Time-series data requires temporal consistency - backward fill would introduce future information</li>
+            <li><strong>Critical:</strong> Never use future data to fill past values (data leakage prevention)</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("2. Feature Engineering")
+        st.markdown("""
+        <div class="metric-card">
+        <h4>Feature Selection</h4>
+        <p><strong>Core Features (OHLCV):</strong></p>
+        <ul>
+            <li><strong>Open:</strong> Opening price - market sentiment indicator</li>
+            <li><strong>High:</strong> Intraday peak - resistance levels</li>
+            <li><strong>Low:</strong> Intraday trough - support levels</li>
+            <li><strong>Close:</strong> Most important - daily trend indicator</li>
+            <li><strong>Volume:</strong> Trading volume - liquidity and conviction measure</li>
+        </ul>
+        
+        <p><strong>Sequence Creation (Lookback Window = 60 days):</strong></p>
+        <ul>
+            <li>Rolling window of 60 consecutive trading days</li>
+            <li>Captures ~3 months of market behavior</li>
+            <li>Input shape: (samples, 60, 5)</li>
+            <li>Enables model to learn temporal patterns</li>
+        </ul>
+        
+        <p><strong>Multi-Horizon Targets:</strong></p>
+        <ul>
+            <li>Target_1day: Close price 1 trading day ahead</li>
+            <li>Target_5day: Close price 5 trading days ahead</li>
+            <li>Target_10day: Close price 10 trading days ahead</li>
+            <li>Output shape: (samples, 3)</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("3. Train-Test Split & Data Leakage Prevention")
+        st.markdown("""
+        <div class="warning-box">
+        <h4>Critical: Temporal Split (No Random Shuffling)</h4>
+        <ul>
+            <li><strong>Training Set:</strong> First 80% (1,873 sequences) - 2010 to 2019</li>
+            <li><strong>Testing Set:</strong> Last 20% (423 sequences) - 2019 to 2020</li>
+            <li><strong>Rationale:</strong> Simulates real-world deployment - predicting truly unseen future</li>
+            <li><strong>No Data Leakage:</strong></li>
+            <ul>
+                <li>Scalers fit ONLY on training data</li>
+                <li>No test set information used during training</li>
+                <li>Sequential targets (shifted -1, -5, -10 days)</li>
+                <li>Validation split within training data only</li>
+            </ul>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("4. Feature Scaling")
+        st.markdown("""
+        <div class="info-box">
+        <h4>MinMaxScaler Normalization</h4>
+        <ul>
+            <li><strong>Range:</strong> [0, 1] for all features and targets</li>
+            <li><strong>Why MinMax:</strong> Preserves OHLC relationships, works well with LSTM</li>
+            <li><strong>Separate Scalers:</strong></li>
+            <ul>
+                <li>scaler_X for features (Open, High, Low, Close, Volume)</li>
+                <li>scaler_y for targets (3 horizon predictions)</li>
+            </ul>
+            <li><strong>Benefits:</strong></li>
+            <ul>
+                <li>Faster neural network convergence</li>
+                <li>Prevents features with large values from dominating</li>
+                <li>Avoids gradient explosion/vanishing</li>
+            </ul>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("5. Hyperparameter Optimization (Optuna)")
+        st.markdown("""
+        <div class="success-box">
+        <h4>Bayesian Optimization Process</h4>
+        <ul>
+            <li><strong>Method:</strong> Tree-structured Parzen Estimator (TPE)</li>
+            <li><strong>Search Space:</strong></li>
+            <ul>
+                <li>Units: [32, 64, 128]</li>
+                <li>Dropout: [0.1, 0.2, 0.3, 0.4]</li>
+                <li>Learning Rate: [0.0001, 0.01] (log scale)</li>
+                <li>Batch Size: [32, 64]</li>
+            </ul>
+            <li><strong>Validation Strategy:</strong> Time-Series Cross-Validation (2 splits)</li>
+            <li><strong>Pruning:</strong> Median pruner (stops unpromising trials early)</li>
+            <li><strong>Trials:</strong> 15 per model (60 total trials)</li>
+            <li><strong>Objective:</strong> Minimize validation MSE</li>
+        </ul>
+        
+        <h4>Best Hyperparameters Found:</h4>
+        <ul>
+            <li><strong>Units:</strong> 64 (optimal capacity without overfitting)</li>
+            <li><strong>Dropout:</strong> 0.2 (20% regularization)</li>
+            <li><strong>Learning Rate:</strong> 0.001 (stable convergence)</li>
+            <li><strong>Batch Size:</strong> 32 (good generalization)</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("6. Model Architecture: Bidirectional LSTM")
+        st.markdown("""
+        <div class="metric-card">
+        <h4>Layer-by-Layer Architecture</h4>
+        <pre style="background: #f5f5f5; padding: 15px; border-radius: 5px;">
+Input Layer: (60, 5)
+  ├─ 60 timesteps (days)
+  └─ 5 features (OHLCV)
+
+Bidirectional LSTM Layer 1: 128 total units
+  ├─ Forward LSTM: 64 units (day 1 → 60)
+  ├─ Backward LSTM: 64 units (day 60 → 1)
+  ├─ Concatenated: 128-dimensional representation
+  └─ return_sequences=True
+
+Dropout Layer 1: 20% dropout rate
+
+Bidirectional LSTM Layer 2: 64 total units
+  ├─ Forward LSTM: 32 units
+  ├─ Backward LSTM: 32 units
+  └─ return_sequences=False (final representation)
+
+Dropout Layer 2: 20% dropout rate
+
+Dense Layer: 32 units, ReLU activation
+  └─ Non-linear transformation
+
+Output Layer: 3 units (no activation)
+  └─ [1-day price, 5-day price, 10-day price]
+
+Optimizer: Adam (learning_rate=0.001)
+Loss Function: MSE (Mean Squared Error)
+        </pre>
+        
+        <h4>Why Bidirectional LSTM</h4>
+        <ul>
+            <li><strong>Forward Pass:</strong> Learns patterns from past to present</li>
+            <li><strong>Backward Pass:</strong> Understands context from present to past</li>
+            <li><strong>Combined:</strong> Rich representation capturing full temporal context</li>
+            <li><strong>Example:</strong> "Price rising + high volume in past + consolidating recently" → Strong uptrend prediction</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("7. Training Process")
+        st.markdown("""
+        <div class="info-box">
+        <h4>Training Configuration</h4>
+        <ul>
+            <li><strong>Epochs:</strong> 100 (with early stopping)</li>
+            <li><strong>Early Stopping:</strong> Patience=10, monitor='val_loss', restore_best_weights=True</li>
+            <li><strong>Learning Rate Reduction:</strong> ReduceLROnPlateau (factor=0.5, patience=5)</li>
+            <li><strong>Validation Split:</strong> 15% of training data</li>
+            <li><strong>Callbacks:</strong> Model checkpointing for best weights</li>
+        </ul>
+        
+        <h4>Training Time</h4>
+        <ul>
+            <li>Per model: ~15-20 minutes (with Optuna optimization)</li>
+            <li>Total for 4 models: ~1 hour</li>
+            <li>Hardware: CPU/GPU compatible</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("8. Evaluation Metrics")
+        st.markdown("""
+        <div class="metric-card">
+        <h4>Why These Metrics Matter</h4>
+        
+        <p><strong>1. R² Score (Coefficient of Determination)</strong></p>
+        <ul>
+            <li><strong>Range:</strong> -∞ to 1 (higher is better)</li>
+            <li><strong>Interpretation:</strong> % of variance explained by model</li>
+            <li><strong>Business Value:</strong> 0.85 = model explains 85% of price movements</li>
+            <li><strong>Use Case:</strong> Validates model reliability for trading</li>
+        </ul>
+        
+        <p><strong>2. RMSE (Root Mean Squared Error)</strong></p>
+        <ul>
+            <li><strong>Units:</strong> Dollars ($)</li>
+            <li><strong>Interpretation:</strong> Average prediction error magnitude</li>
+            <li><strong>Business Value:</strong> $23.72 RMSE = stop-loss should be ±$30</li>
+            <li><strong>Use Case:</strong> Risk management and position sizing</li>
+        </ul>
+        
+        <p><strong>3. MAE (Mean Absolute Error)</strong></p>
+        <ul>
+            <li><strong>Units:</strong> Dollars ($)</li>
+            <li><strong>Interpretation:</strong> Typical absolute error</li>
+            <li><strong>Business Value:</strong> $16.95 MAE = expect ±$17 deviation</li>
+            <li><strong>Use Case:</strong> Setting realistic profit targets</li>
+        </ul>
+        
+        <p><strong>4. MAPE (Mean Absolute Percentage Error)</strong></p>
+        <ul>
+            <li><strong>Units:</strong> Percentage (%)</li>
+            <li><strong>Interpretation:</strong> Scale-independent accuracy</li>
+            <li><strong>Business Value:</strong> 5.34% MAPE = excellent for volatile stocks</li>
+            <li><strong>Use Case:</strong> Comparing across different price levels</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()

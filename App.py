@@ -116,47 +116,62 @@ def load_model_artifacts():
         
         files_in_dir = os.listdir(deployment_dir)
         
-        # Find .keras file (prioritize over .h5)
+        # Find .h5 file
         model_file = None
         for file in files_in_dir:
-            if file.endswith('.keras'):
+            if file.endswith('.h5'):
                 model_file = file
                 break
         
-        # If no .keras file, try .h5
         if not model_file:
-            for file in files_in_dir:
-                if file.endswith('.h5'):
-                    model_file = file
-                    break
-        
-        if not model_file:
-            st.error("No model file (.keras or .h5) found in deployment_artifacts/")
+            st.error("No model file (.h5) found in deployment_artifacts/")
             return None, None, None, None
         
         model_path = os.path.join(deployment_dir, model_file)
         
-        # Load model with custom objects for compatibility
+        # CRITICAL FIX: Load with compile=False to avoid batch_shape issues
         try:
-            custom_objects = {
-                'mse': MeanSquaredError(),
-                'MeanSquaredError': MeanSquaredError
-            }
-            model = load_model(model_path, custom_objects=custom_objects, compile=False)
+            st.info("Attempting to load model...")
+            model = load_model(model_path, compile=False)
             
-            # Recompile with compatible metrics
+            # Manually recompile
             model.compile(
                 optimizer='adam',
                 loss='mse',
-                metrics=[MeanSquaredError(name='mse')]
+                metrics=['mae']
             )
+            st.success("✓ Model loaded successfully")
+            
         except Exception as e:
             st.error(f"Error loading model: {str(e)}")
             st.info("Attempting alternative loading method...")
-            model = load_model(model_path, compile=False)
-            model.compile(optimizer='adam', loss='mse')
-            st.success("Model loaded with alternative method")
+            
+            # Fallback: Rebuild architecture and load weights
+            try:
+                from tensorflow.keras.models import Sequential
+                from tensorflow.keras.layers import Bidirectional, LSTM, Dropout, Dense
+                
+                # Rebuild the exact architecture
+                model = Sequential([
+                    Bidirectional(LSTM(64, return_sequences=True), input_shape=(60, 5)),
+                    Dropout(0.2),
+                    Bidirectional(LSTM(32)),
+                    Dropout(0.2),
+                    Dense(32, activation='relu'),
+                    Dense(3)
+                ])
+                
+                model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+                
+                # Load weights only
+                model.load_weights(model_path)
+                st.success("✓ Model architecture rebuilt and weights loaded")
+                
+            except Exception as e2:
+                st.error(f"Alternative method also failed: {str(e2)}")
+                return None, None, None, None
         
+        # Rest of your code remains the same...
         # Load Scalers
         scaler_X_path = os.path.join(deployment_dir, 'scaler_features.pkl')
         scaler_y_path = os.path.join(deployment_dir, 'scaler_target.pkl')
@@ -168,31 +183,16 @@ def load_model_artifacts():
         scaler_X = joblib.load(scaler_X_path)
         scaler_y = joblib.load(scaler_y_path)
         
-        # Load Feature Columns
-        feature_cols_path = os.path.join(deployment_dir, 'feature_columns.pkl')
-        
-        if os.path.exists(feature_cols_path):
-            feature_columns = joblib.load(feature_cols_path)
-        else:
-            st.warning("Feature columns file not found, using default OHLCV")
-            feature_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        
-        # Load Configuration
+        # Load config...
         config_path = os.path.join(deployment_dir, 'model_config.json')
-        
         if os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 config = json.load(f)
         else:
-            config_pkl_path = os.path.join(deployment_dir, 'model_config.pkl')
-            if os.path.exists(config_pkl_path):
-                config = joblib.load(config_pkl_path)
-            else:
-                st.warning("Config not found, using defaults")
-                config = {}
+            config = {}
         
-        # Set default values
-        config.setdefault('feature_columns', feature_columns)
+        # Set defaults
+        config.setdefault('feature_columns', ['Open', 'High', 'Low', 'Close', 'Volume'])
         config.setdefault('lookback_window', 60)
         config.setdefault('model_name', 'Bidirectional LSTM')
         config.setdefault('framework', 'TensorFlow/Keras')

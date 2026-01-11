@@ -152,9 +152,7 @@ def load_model_artifacts():
         
         for method_name, load_func in loading_methods:
             try:
-                st.info(f"Trying: {method_name}...")
                 model = load_func()
-                st.success(f"✓ Model loaded successfully using: {method_name}")
                 break
             except Exception as e:
                 st.warning(f"✗ {method_name} failed: {str(e)[:100]}")
@@ -173,7 +171,6 @@ def load_model_artifacts():
                 loss='mse',
                 metrics=['mae']
             )
-            st.success("Model recompiled successfully")
         except Exception as e:
             st.warning(f"Recompilation warning: {str(e)}")
         
